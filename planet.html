@@ -1,0 +1,938 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>演化星球</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Noto+Sans+TC:wght@400;500;700&family=Space+Grotesk:wght@500;700&display=swap">
+<style>
+/* 版面：星球鋪滿整個畫面；上方是讀數與時間流速，下方是分頁控制台，追蹤生物時右上角出現大腦面板。單一深色太空主題。 */
+:root {
+  color-scheme: dark;
+  --space: #04060c;
+  --panel: rgba(10, 16, 28, 0.82);
+  --line: rgba(160, 190, 230, 0.2);
+  --fg: #e6eef8;
+  --muted: #8fa3bd;
+  --sun: #ffc46b;
+  --life: #6fe0b0;
+  --cold: #6aa9ff;
+  --display: "Space Grotesk", "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", sans-serif;
+  --body: "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", system-ui, sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  --gl: max(16px, env(safe-area-inset-left, 0px));
+  --gr: max(16px, env(safe-area-inset-right, 0px));
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { height: 100%; }
+body { background: var(--space); color: var(--fg); font-family: var(--body); font-size: 14px; line-height: 1.5; overflow: hidden; }
+#app { position: relative; height: 100%; overflow: hidden; }
+#gl { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; outline: none; }
+button, input { font: inherit; color: inherit; }
+button {
+  background: rgba(255, 255, 255, 0.06); border: 1px solid var(--line); border-radius: 4px;
+  padding: 8px 12px; min-height: 36px; cursor: pointer; font-weight: 500;
+}
+button:hover { border-color: var(--muted); }
+button[aria-pressed="true"] { background: var(--fg); color: var(--space); border-color: var(--fg); font-weight: 700; }
+button.go { background: var(--life); color: #04261a; border-color: var(--life); font-weight: 700; }
+button:focus-visible, input:focus-visible, #gl:focus-visible { outline: 2px solid var(--sun); outline-offset: 2px; }
+.seg { display: flex; }
+.seg button { border-radius: 0; margin-left: -1px; }
+.seg button:first-child { border-radius: 4px 0 0 4px; margin-left: 0; }
+.seg button:last-child { border-radius: 0 4px 4px 0; }
+
+#hud {
+  position: absolute; top: 0; left: 0; right: 0; pointer-events: none;
+  padding: 12px var(--gr) 0 var(--gl);
+  display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 8px 16px;
+}
+#hud > * { pointer-events: auto; }
+h1 { font-family: var(--display); font-size: 22px; line-height: 1; margin: 0; letter-spacing: 0.04em; }
+.stats { display: flex; flex-wrap: wrap; gap: 4px 16px; margin: 8px 0 0; font-family: var(--mono); font-variant-numeric: tabular-nums; }
+.stats div { display: flex; gap: 6px; align-items: baseline; }
+.stats dt { font-family: var(--body); font-size: 11px; color: var(--muted); letter-spacing: 0.08em; }
+.stats dd { margin: 0; font-weight: 600; }
+#speed button { min-width: 44px; padding: 6px 8px; background: var(--panel); }
+#speed button[aria-pressed="true"] { background: var(--fg); }
+
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); }
+#dock { position: absolute; left: var(--gl); bottom: max(16px, env(safe-area-inset-bottom, 0px)); width: 380px; max-width: calc(100% - var(--gl) - var(--gr)); }
+#dock .tabs { display: flex; border-bottom: 1px solid var(--line); }
+#dock .tabs button { flex: 1; border: 0; border-radius: 0; background: none; color: var(--muted); border-bottom: 2px solid transparent; }
+#dock .tabs button[aria-selected="true"] { color: var(--fg); border-bottom-color: var(--sun); font-weight: 700; }
+.pane { padding: 12px; display: flex; flex-direction: column; gap: 10px; }
+.field { display: grid; grid-template-columns: 5.5em minmax(0, 1fr) 6em; align-items: center; gap: 8px; }
+.field output { font-family: var(--mono); font-variant-numeric: tabular-nums; text-align: right; font-size: 13px; }
+input[type="range"] { width: 100%; accent-color: var(--sun); }
+.note { color: var(--muted); font-size: 12px; margin: 0; }
+.rowb { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+#splist { display: flex; flex-direction: column; gap: 4px; max-height: 150px; overflow-y: auto; }
+#splist button { display: grid; grid-template-columns: 12px 4.5em 3em minmax(0, 1fr); gap: 8px; align-items: center; text-align: left; padding: 5px 8px; min-height: 32px; border-color: transparent; }
+#splist button:hover { border-color: var(--line); }
+#splist .dot { width: 10px; height: 10px; border-radius: 50%; }
+#splist .n { font-family: var(--mono); text-align: right; font-variant-numeric: tabular-nums; }
+#splist .tags { color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+#brain { position: absolute; right: var(--gr); top: 76px; width: 330px; max-width: calc(100% - var(--gl) - var(--gr)); padding: 12px; display: flex; flex-direction: column; gap: 8px; }
+#brain h2 { font-family: var(--display); font-size: 18px; margin: 0; display: flex; align-items: center; gap: 8px; }
+#brain h2 i { width: 12px; height: 12px; border-radius: 50%; display: inline-block; }
+#bTags { color: var(--muted); font-size: 12px; margin: 0; }
+#bThought { margin: 0; font-weight: 500; color: var(--sun); min-height: 1.5em; }
+#bStats { display: flex; flex-wrap: wrap; gap: 2px 14px; font-family: var(--mono); font-size: 12px; margin: 0; font-variant-numeric: tabular-nums; }
+#bStats span { color: var(--muted); font-family: var(--body); margin-right: 4px; }
+#bNet { width: 100%; height: 190px; display: block; }
+#toast { position: absolute; left: 50%; top: 40%; transform: translateX(-50%); padding: 10px 16px; max-width: 80%; text-align: center; pointer-events: none; }
+#fail { position: absolute; inset: 0; display: grid; place-items: center; padding: 24px; text-align: center; }
+@media (max-width: 640px) {
+  #dock { left: 0; right: 0; bottom: 0; width: auto; max-width: none; border-radius: 6px 6px 0 0; border-width: 1px 0 0; padding-bottom: env(safe-area-inset-bottom, 0px); }
+  .pane { padding: 10px var(--gr) 12px var(--gl); }
+  #brain { top: 116px; left: var(--gl); right: var(--gr); width: auto; max-width: none; padding: 10px; gap: 4px; }
+  #bNet { height: 156px; }
+  #bTags { display: none; }
+  #splist { max-height: 104px; }
+}
+</style>
+
+</head>
+<body style="margin:0">
+<div id="app">
+  <canvas id="gl" tabindex="0" aria-label="星球畫面：拖曳旋轉、滾輪或兩指縮放、點生物開始追蹤"></canvas>
+
+  <div id="hud">
+    <div>
+      <h1>演化星球</h1>
+      <dl class="stats">
+        <div><dt>人口</dt><dd id="sPop">0</dd></div>
+        <div><dt>物種</dt><dd id="sSp">0</dd></div>
+        <div><dt>世代</dt><dd id="sGen">0</dd></div>
+        <div><dt>年</dt><dd id="sYear">0</dd></div>
+        <div><dt>均溫</dt><dd id="sTemp">15°C</dd></div>
+      </dl>
+    </div>
+    <div class="seg" id="speed" role="group" aria-label="時間流速">
+      <button type="button" data-v="0" aria-pressed="false">暫停</button>
+      <button type="button" data-v="1" aria-pressed="false">1×</button>
+      <button type="button" data-v="4" aria-pressed="true">4×</button>
+      <button type="button" data-v="16" aria-pressed="false">16×</button>
+    </div>
+  </div>
+
+  <section id="brain" class="card" hidden aria-live="off">
+    <h2><i id="bDot"></i><span id="bName"></span></h2>
+    <p id="bTags"></p>
+    <p id="bThought"></p>
+    <p id="bStats"></p>
+    <canvas id="bNet" aria-label="這隻生物的神經網路即時活動"></canvas>
+    <div class="rowb"><button type="button" id="bBack">回到太空</button><button type="button" id="bNext">換一隻同類</button></div>
+  </section>
+
+  <section id="dock" class="card">
+    <div class="tabs" role="tablist">
+      <button type="button" role="tab" id="tab-land" aria-selected="true" data-pane="pane-land">地形</button>
+      <button type="button" role="tab" id="tab-env" aria-selected="false" data-pane="pane-env">環境</button>
+      <button type="button" role="tab" id="tab-life" aria-selected="false" data-pane="pane-life">生物</button>
+    </div>
+    <div class="pane" id="pane-land">
+      <div class="seg" id="tools" role="group" aria-label="工具">
+        <button type="button" data-tool="look" aria-pressed="true">觀察</button>
+        <button type="button" data-tool="raise" aria-pressed="false">隆起</button>
+        <button type="button" data-tool="dig" aria-pressed="false">下挖</button>
+      </div>
+      <label class="field" for="brush">筆刷大小<input id="brush" type="range" min="4" max="30" value="12"><output id="brushOut" for="brush">中</output></label>
+      <p class="note" id="toolNote">拖曳旋轉星球，滾輪或兩指縮放。點一隻生物就能貼近追蹤牠。</p>
+    </div>
+    <div class="pane" id="pane-env" hidden>
+      <label class="field" for="sun">太陽距離<input id="sun" type="range" min="0.75" max="1.4" step="0.01" value="1"><output id="sunOut" for="sun">1.00 AU</output></label>
+      <label class="field" for="atm">大氣濃度<input id="atm" type="range" min="0" max="2" step="0.02" value="1"><output id="atmOut" for="atm">1.00 倍</output></label>
+      <p class="note" id="envNote"></p>
+      <div class="rowb"><button type="button" id="newPlanet">換一顆新星球</button></div>
+    </div>
+    <div class="pane" id="pane-life" hidden>
+      <div class="rowb"><button type="button" class="go" id="drop">投放一批原始生物</button><span class="note" id="dropNote">投放在畫面正中央的位置</span></div>
+      <div id="splist" aria-label="目前數量最多的物種，點一下追蹤"></div>
+    </div>
+  </section>
+
+  <div id="toast" class="card" role="status" hidden></div>
+  <div id="fail" hidden><p>這個瀏覽器無法啟動 3D 繪圖（WebGL），所以星球畫不出來。請換一個瀏覽器或裝置再試。</p></div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+// 演化模擬核心：不依賴畫面，星球表面用經緯網格存高度、食物與氣溫
+function createSim(opts) {
+  const GW = 256, GH = 128, FW = 128, FH = 64, MAXN = opts.maxN || 420;
+  const NI = 12, NH = 8, NO = 3, NW = NI * NH + (NH + 1) * NO;
+  const SENSE = 0.1, PI = Math.PI;
+  let seed = opts.seed || 1, nseed = (opts.seed || 1) * 7919;
+  function rnd() { seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }
+  function gauss() { return (rnd() + rnd() + rnd() + rnd() - 2) * 1.73; }
+  const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
+
+  // ── 地形雜訊 ──
+  function h3(x, y, z) { let n = Math.imul(x, 374761393) ^ Math.imul(y, 668265263) ^ Math.imul(z, 1274126177) ^ nseed; n = Math.imul(n ^ n >>> 13, 1103515245); return ((n ^ n >>> 16) >>> 0) / 4294967296; }
+  function vnoise(x, y, z) {
+    const xi = Math.floor(x), yi = Math.floor(y), zi = Math.floor(z);
+    let fx = x - xi, fy = y - yi, fz = z - zi;
+    fx = fx * fx * (3 - 2 * fx); fy = fy * fy * (3 - 2 * fy); fz = fz * fz * (3 - 2 * fz);
+    const l = (a, b, t) => a + (b - a) * t;
+    return l(l(l(h3(xi, yi, zi), h3(xi + 1, yi, zi), fx), l(h3(xi, yi + 1, zi), h3(xi + 1, yi + 1, zi), fx), fy),
+             l(l(h3(xi, yi, zi + 1), h3(xi + 1, yi, zi + 1), fx), l(h3(xi, yi + 1, zi + 1), h3(xi + 1, yi + 1, zi + 1), fx), fy), fz) * 2 - 1;
+  }
+  function fbm(x, y, z, oct) { let a = 0.5, s = 0, f = 1; for (let o = 0; o < oct; o++) { s += a * vnoise(x * f + o * 17, y * f - o * 11, z * f + o * 5); a *= 0.5; f *= 2.05; } return s; }
+
+  // ── 網格 ──
+  const hgt = new Float32Array(GW * GH), cellVec = new Float32Array(GW * GH * 3);
+  const food = new Float32Array(FW * FH), cap = new Float32Array(FW * FH), temp = new Float32Array(FW * FH), hF = new Float32Array(FW * FH), cosL = new Float32Array(FH);
+  for (let j = 0; j < GH; j++) for (let i = 0; i < GW; i++) {
+    const lat = (0.5 - (j + 0.5) / GH) * PI, lon = ((i + 0.5) / GW - 0.5) * 2 * PI, k = (j * GW + i) * 3;
+    cellVec[k] = Math.cos(lat) * Math.cos(lon); cellVec[k + 1] = Math.sin(lat); cellVec[k + 2] = Math.cos(lat) * Math.sin(lon);
+  }
+  for (let j = 0; j < FH; j++) cosL[j] = Math.cos((0.5 - (j + 0.5) / FH) * PI);
+  const climate = { sunDist: 1, atm: 1, mean: 15 };
+  let climateDirty = true;
+
+  function genTerrain() {
+    for (let k = 0; k < GW * GH; k++) {
+      const x = cellVec[k * 3], y = cellVec[k * 3 + 1], z = cellVec[k * 3 + 2];
+      let n = fbm(x * 1.5 + 3, y * 1.5, z * 1.5, 5);
+      let h = n * 0.11 - 0.002;
+      if (h > 0) h += Math.max(0, 0.5 - Math.abs(fbm(x * 4, y * 4 + 9, z * 4, 3))) * h * 1.6;   // 陸地上疊山脊
+      hgt[k] = clamp(h, -0.09, 0.14);
+    }
+    climateDirty = true;
+  }
+  function heightAt(x, y, z) {
+    let u = (Math.atan2(z, x) / (2 * PI) + 0.5) * GW - 0.5, v = (0.5 - Math.asin(clamp(y, -1, 1)) / PI) * GH - 0.5;
+    v = clamp(v, 0, GH - 1.001);
+    const i0 = Math.floor(u), j0 = Math.floor(v), fu = u - i0, fv = v - j0;
+    const a = (i0 + GW) % GW, b = (i0 + 1 + GW) % GW, r0 = j0 * GW, r1 = (j0 + 1) * GW;
+    return (hgt[r0 + a] * (1 - fu) + hgt[r0 + b] * fu) * (1 - fv) + (hgt[r1 + a] * (1 - fu) + hgt[r1 + b] * fu) * fv;
+  }
+  // 查食物格用的近似反三角函數（誤差遠小於一格），比 Math.atan2 / asin 快很多
+  function fatan2(y, x) {
+    const ax = x < 0 ? -x : x, ay = y < 0 ? -y : y, mx = ax > ay ? ax : ay; if (mx === 0) return 0;
+    const a = (ax < ay ? ax : ay) / mx, s = a * a;
+    let r = ((-0.0464964749 * s + 0.15931422) * s - 0.327622764) * s * a + a;
+    if (ay > ax) r = 1.57079637 - r; if (x < 0) r = 3.14159274 - r; return y < 0 ? -r : r;
+  }
+  function fasin(y) {
+    const a = y < 0 ? -y : y, r = 1.5707963 - Math.sqrt(1 - (a > 1 ? 1 : a)) * (1.5707288 + a * (-0.2121144 + a * (0.0742610 - 0.0187293 * a)));
+    return y < 0 ? -r : r;
+  }
+  function fIdx(x, y, z) {
+    let i = Math.floor((fatan2(z, x) * 0.15915494 + 0.5) * FW); if (i >= FW) i = FW - 1; if (i < 0) i = 0;
+    let j = Math.floor((0.5 - fasin(y) * 0.31830989) * FH); if (j >= FH) j = FH - 1; if (j < 0) j = 0;
+    return j * FW + i;
+  }
+  function refreshClimate() {
+    climateDirty = false;
+    const S = 1 / (climate.sunDist * climate.sunDist), atm = climate.atm;
+    const mean = 255 * Math.pow(S, 0.25) - 273 + 33 * atm, grad = Math.max(25, 50 * (1.3 - 0.3 * atm));
+    climate.mean = mean; climate.grad = grad;
+    const moist = Math.min(1, 0.25 + atm * 0.75);
+    for (let j = 0; j < FH; j++) {
+      const sl = Math.sqrt(1 - cosL[j] * cosL[j]), band = 0.3 - sl * sl;
+      for (let i = 0; i < FW; i++) {
+        const k = j * FW + i, g = (j * 2) * GW + i * 2;
+        const h = (hgt[g] + hgt[g + 1] + hgt[g + GW] + hgt[g + GW + 1]) * 0.25;
+        hF[k] = h;
+        let T, c;
+        if (h > 0) { T = mean + grad * band - 350 * h; c = moist * Math.exp(-Math.pow((T - 22) / 20, 2)); }
+        else { T = mean + grad * 0.8 * band; c = T < -2 ? 0 : (h > -0.03 ? 0.45 : 0.18) * Math.exp(-Math.pow((T - 16) / 22, 2)); }
+        temp[k] = T; cap[k] = c * cosL[j];
+      }
+    }
+  }
+  function growFood(n) {
+    for (let k = 0; k < FW * FH; k++) {
+      const c = cap[k]; let f = food[k];
+      if (f > c) f -= (f - c) * 0.02 * n; else f += (0.004 * f * (1 - f / (c + 1e-6)) + 0.0004 * c) * n;
+      food[k] = f < 1e-6 ? 0 : f;
+    }
+  }
+  function sculpt(x, y, z, radius, amount) {
+    const cr = Math.cos(radius);
+    for (let k = 0; k < GW * GH; k++) {
+      const d = cellVec[k * 3] * x + cellVec[k * 3 + 1] * y + cellVec[k * 3 + 2] * z;
+      if (d < cr) continue;
+      const t = Math.acos(Math.min(1, d)) / radius, f = (1 - t * t) * (1 - t * t);
+      hgt[k] = clamp(hgt[k] + amount * f, -0.09, 0.14);
+    }
+    climateDirty = true;
+  }
+
+  // ── 物種 ──
+  const SYL = '卡魯米托奈沙洛菲烏澤比嵐庫瑪索林雅葛塔諾維伊布蘿'.split('');
+  let creatures = [], species = [], nextSp = 1, tick = 0, totalSpecies = 0, maxGen = 0;
+  function spName(g) {
+    const a = SYL[Math.floor(rnd() * SYL.length)], b = SYL[Math.floor(rnd() * SYL.length)];
+    const tail = g.aqua > 0.6 ? (g.size > 1.3 ? '鯨' : '魚') : g.aqua > 0.35 ? '蛙' : g.diet > 0.55 ? (g.size > 1.2 ? '獸' : '蛛') : (g.size > 1.3 ? '象' : g.size < 0.8 ? '蟲' : '鹿');
+    return a + b + tail;
+  }
+  function newSpecies(g, parent) {
+    const p = parent ? species.find((s) => s.id === parent) : null;
+    const s = { id: nextSp++, parent: parent || 0, hue: p ? (p.hue + 0.11 + rnd() * 0.25) % 1 : rnd(), count: 0, born: tick,
+      ref: { size: g.size, diet: g.diet, aqua: g.aqua, tpref: g.tpref, w: g.w.slice() }, name: spName(g) };
+    species.push(s); totalSpecies++;
+    return s;
+  }
+  function gdist(g, r) {
+    let s = 0; for (let i = 0; i < NW; i++) { const d = g.w[i] - r.w[i]; s += d * d; }
+    return Math.abs(g.size - r.size) / 0.5 + Math.abs(g.diet - r.diet) / 0.3 + Math.abs(g.aqua - r.aqua) / 0.3 + Math.abs(g.tpref - r.tpref) / 10 + Math.sqrt(s / NW) / 0.6;
+  }
+  function spawn(x, y, z, g, sp, energy, gen, ref) {
+    let fx = rnd() - 0.5, fy = rnd() - 0.5, fz = rnd() - 0.5;
+    const d = fx * x + fy * y + fz * z; fx -= d * x; fy -= d * y; fz -= d * z;
+    const l = Math.sqrt(fx * fx + fy * fy + fz * fz) || 1;
+    const c = { x, y, z, fx: fx / l, fy: fy / l, fz: fz / l, g, sp, ref: ref || g, e: energy, age: 0, gen, life: 1800 + rnd() * 900, dead: false,
+      act: new Float32Array(NI + NH + NO), nb: 0, inWater: false, T: 0, kids: 0, kills: 0, attacking: false };
+    sp.count++; creatures.push(c);
+    if (gen > maxGen) maxGen = gen;
+    return c;
+  }
+  function drop(x, y, z, n, spread) {
+    let made = 0;
+    for (let i = 0; i < n && creatures.length < MAXN; i++) {
+      let px = x + gauss() * spread, py = y + gauss() * spread, pz = z + gauss() * spread;
+      const l = Math.hypot(px, py, pz); px /= l; py /= l; pz /= l;
+      const k = fIdx(px, py, pz), w = new Float32Array(NW);
+      for (let j = 0; j < NW; j++) w[j] = gauss() * 0.6;
+      const g = { w, size: clamp(1 + gauss() * 0.1, 0.5, 2.2), diet: clamp(0.08 + Math.abs(gauss()) * 0.14, 0, 1), aqua: clamp((hF[k] < 0 ? 0.85 : 0.15) + gauss() * 0.05, 0, 1), tpref: clamp(temp[k] + gauss() * 3, 0, 40) };
+      // 同一批、同一種棲地的歸為同一個原始物種
+      let sp = species.find((s) => s.batch === dropCount && s.wet === (hF[k] < 0));
+      if (!sp) { sp = newSpecies(g, 0); sp.batch = dropCount; sp.wet = hF[k] < 0; }
+      spawn(px, py, pz, g, sp, 1, 1); made++;
+    }
+    dropCount++;
+    return made;
+  }
+  let dropCount = 0;
+  function mutate(p) {
+    const w = p.w.slice();
+    for (let i = 0; i < NW; i++) if (rnd() < 0.1) w[i] += gauss() * 0.3;
+    return { w, size: clamp(p.size + gauss() * 0.04, 0.5, 2.2), diet: clamp(p.diet + gauss() * 0.03, 0, 1), aqua: clamp(p.aqua + gauss() * 0.03, 0, 1), tpref: clamp(p.tpref + gauss() * 1.0, 0, 40) };
+  }
+
+  // ── 空間雜湊 ──
+  const head = new Int16Array(4096), nxt = new Int16Array(MAXN + 64);
+  const hk = (v) => { const i = Math.floor((v + 1) * 8); return i < 0 ? 0 : i > 15 ? 15 : i; };
+
+  function step() {
+    if (climateDirty) refreshClimate();
+    tick++;
+    const n0 = creatures.length;
+    head.fill(-1);
+    for (let i = 0; i < n0; i++) { const c = creatures[i], k = hk(c.x) + hk(c.y) * 16 + hk(c.z) * 256; nxt[i] = head[k]; head[k] = i; }
+    for (let i = 0; i < n0; i++) {
+      const c = creatures[i]; if (c.dead) continue;
+      const g = c.g, a = c.act, x = c.x, y = c.y, z = c.z;
+      const sx = y * c.fz - z * c.fy, sy = z * c.fx - x * c.fz, sz = x * c.fy - y * c.fx;   // 左手邊
+      const k = fIdx(x, y, z);
+      // 鄰居
+      let best = null, bd = SENSE * SENSE, nb = 0;
+      const cx = hk(x), cy = hk(y), cz = hk(z);
+      for (let dz = -1; dz <= 1; dz++) for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+        const X = cx + dx, Y = cy + dy, Z = cz + dz; if (X < 0 || Y < 0 || Z < 0 || X > 15 || Y > 15 || Z > 15) continue;
+        for (let j = head[X + Y * 16 + Z * 256]; j >= 0; j = nxt[j]) {
+          if (j === i) continue; const o = creatures[j]; if (o.dead) continue;
+          const d2 = (o.x - x) * (o.x - x) + (o.y - y) * (o.y - y) + (o.z - z) * (o.z - z);
+          if (d2 < 0.0025) nb++;
+          if (d2 < bd) { bd = d2; best = o; }
+        }
+      }
+      c.nb = nb;
+      // 前方感測
+      const L = 0.06, ax = x + c.fx * L, ay = y + c.fy * L, az = z + c.fz * L;
+      const kl = fIdx(ax + sx * L * 0.7, ay + sy * L * 0.7, az + sz * L * 0.7), kr = fIdx(ax - sx * L * 0.7, ay - sy * L * 0.7, az - sz * L * 0.7), ka = fIdx(ax, ay, az);
+      const inWater = hF[k] < 0, fit = inWater ? g.aqua : 1 - g.aqua;
+      const fitA = hF[ka] < 0 ? g.aqua : 1 - g.aqua;
+      const Teff = temp[k] + 4 * Math.min(nb, 5);   // 擠在一起會互相取暖
+      c.inWater = inWater; c.T = Teff;
+      a[0] = 1; a[1] = clamp(c.e / (1.3 * g.size), 0, 1.5); a[2] = Math.min(1, food[k] * 1.6 / (cosL[(k / FW) | 0] + 0.05));
+      a[3] = clamp((food[kl] - food[kr]) * 4, -1, 1); a[4] = Math.min(1, (food[kl] + food[kr]) * 0.8);
+      a[5] = fitA * 2 - 1; a[6] = clamp((Teff - g.tpref) / 20, -1.5, 1.5);
+      a[7] = clamp((Math.abs(temp[ka] - g.tpref) - Math.abs(temp[k] - g.tpref)) / 10, -1, 1);
+      if (best) {
+        const d = Math.sqrt(bd) + 1e-6, ox = best.x - x, oy = best.y - y, oz = best.z - z;
+        a[8] = (ox * sx + oy * sy + oz * sz) / d; a[9] = 1 - d / SENSE;
+        a[10] = best.sp === c.sp ? 0 : Math.tanh(best.g.size * (0.2 + best.g.diet * 1.5) - g.size);
+        a[11] = best.sp === c.sp ? 1 : -1;
+      } else { a[8] = 0; a[9] = 0; a[10] = 0; a[11] = 0; }
+      // 大腦
+      const w = g.w; let p = 0;
+      for (let h = 0; h < NH; h++) { let s = 0; for (let q = 0; q < NI; q++) s += a[q] * w[p++]; a[NI + h] = Math.tanh(s); }
+      for (let o = 0; o < NO; o++) { let s = w[p++]; for (let h = 0; h < NH; h++) s += a[NI + h] * w[p++]; a[NI + NH + o] = Math.tanh(s); }
+      const turn = a[NI + NH] * 0.35, thrust = (a[NI + NH + 1] + 1) * 0.5, attack = a[NI + NH + 2] > 0;
+      // 移動
+      const ct = 1 - turn * turn * 0.5, st = turn - turn * turn * turn / 6;
+      let fx = c.fx * ct + sx * st, fy = c.fy * ct + sy * st, fz = c.fz * ct + sz * st;
+      const sp = thrust * 0.007 / Math.sqrt(g.size) * (0.15 + 0.85 * fit);
+      let nx = x + fx * sp, ny = y + fy * sp, nz = z + fz * sp; let l = Math.sqrt(nx * nx + ny * ny + nz * nz); nx /= l; ny /= l; nz /= l;
+      const d = fx * nx + fy * ny + fz * nz; fx -= d * nx; fy -= d * ny; fz -= d * nz; l = Math.sqrt(fx * fx + fy * fy + fz * fz) || 1;
+      c.x = nx; c.y = ny; c.z = nz; c.fx = fx / l; c.fy = fy / l; c.fz = fz / l;
+      // 進食
+      const bite = Math.min(food[k], 0.04 * g.size);
+      food[k] -= bite; c.e += bite * opts.gain * fit * (1 - g.diet * g.diet);
+      // 消耗
+      const dT = Teff - g.tpref, stress = dT < 0 ? Math.max(0, -dT - 8) / (10 * g.size) : Math.max(0, dT - 8) / 10;   // 體型大比較耐寒
+      c.e -= 0.002 * g.size * (0.4 + 1.2 * thrust * thrust) + 0.0015 * stress + 0.004 * (1 - fit) * (1 - fit);
+      // 捕食
+      c.attacking = false;
+      if (attack && g.diet > 0.15 && best && best.sp !== c.sp && bd < 0.0005) {
+        c.attacking = true; c.e -= 0.003;
+        if (g.size * (0.4 + g.diet) * (0.6 + rnd() * 0.8) > best.g.size * (0.6 + 0.4 * best.g.diet)) {
+          best.dead = true; c.kills++;
+          c.e += (0.6 * Math.max(best.e, 0) + 0.5 * best.g.size) * Math.sqrt(g.diet);
+        }
+      }
+      if (c.e > 2 * g.size) c.e = 2 * g.size;
+      c.age++;
+      if (c.e <= 0 || c.age > c.life) { c.dead = true; continue; }
+      // 繁殖
+      if (c.e > 1.3 * g.size && c.age > 80 && creatures.length < MAXN) {
+        const cg = mutate(g); let s = c.sp, ref = c.ref;
+        if (gdist(cg, ref) > opts.spTh) {   // 跟自己這一支的祖先差太多，就算新物種
+          ref = cg;
+          let sis = null;
+          for (const t of species) if (t.parent === s.id && t.count > 0 && gdist(cg, t.ref) < opts.spTh * 0.6) { sis = t; break; }
+          s = sis || newSpecies(cg, s.id);
+        }
+        const ce = c.e * 0.45; c.e *= 0.5; c.kids++;
+        spawn(nx - c.fx * 0.004, ny - c.fy * 0.004, nz - c.fz * 0.004, cg, s, ce, c.gen + 1, ref);
+        const b = creatures[creatures.length - 1], bl = Math.hypot(b.x, b.y, b.z); b.x /= bl; b.y /= bl; b.z /= bl;
+      }
+    }
+    // 清掉死亡個體，屍體變成一點養分
+    let m = 0;
+    for (let i = 0; i < creatures.length; i++) {
+      const c = creatures[i];
+      if (c.dead) { c.sp.count--; const k = fIdx(c.x, c.y, c.z); food[k] = Math.min(food[k] + 0.05, Math.max(cap[k], 0.05)); }
+      else creatures[m++] = c;
+    }
+    creatures.length = m;
+    if (tick % 4 === 0) growFood(4);
+    if (tick % 200 === 0) species = species.filter((s) => s.count > 0 || tick - s.born < 50);
+  }
+
+  function reset(newSeed) {
+    if (newSeed) { seed = newSeed; nseed = newSeed * 7919; }
+    creatures = []; species = []; tick = 0; maxGen = 0; totalSpecies = 0;
+    genTerrain(); refreshClimate();
+    for (let k = 0; k < FW * FH; k++) food[k] = cap[k] * 0.6;
+  }
+  reset();
+
+  return {
+    GW, GH, FW, FH, NI, NH, NO, MAXN, hgt, food, cap, temp, hF, cosL, climate,
+    step, reset, drop, sculpt, heightAt, fIdx, refreshClimate, rnd,
+    setClimate(d, a) { climate.sunDist = d; climate.atm = a; climateDirty = true; refreshClimate(); },
+    get dirty() { return climateDirty; },
+    get creatures() { return creatures; }, get species() { return species; }, get tick() { return tick; },
+    get maxGen() { return maxGen; }, get totalSpecies() { return totalSpecies; },
+  };
+}
+
+</script>
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const canvas = $('gl');
+  const narrow = window.innerWidth < 640;
+  const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
+  let renderer;
+  try { renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' }); }
+  catch (e) { $('fail').hidden = false; $('dock').hidden = true; return; }
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  renderer.setClearColor(0x04060c);
+
+  const sim = createSim({ seed: (Math.random() * 2e9) | 1, gain: 0.7, spTh: 2.4, maxN: narrow ? 300 : 450 });
+  const scene = new THREE.Scene();
+  const camera = new THREE.PerspectiveCamera(42, 1, 0.004, 400);
+  const sunDir = new THREE.Vector3(1, 0.25, 0.3).normalize();
+  const U = { sun: { value: sunDir }, cam: { value: camera.position }, atm: { value: 1 }, time: { value: 0 }, near: { value: 0 } };
+
+  // ───── 著色器 ─────
+  const SKY = `
+    vec3 skyTint(vec3 n, vec3 sun) { return mix(vec3(1.0, 0.48, 0.22), vec3(0.32, 0.56, 1.0), smoothstep(-0.08, 0.35, dot(n, sun))); }
+    float dayAmt(vec3 n, vec3 sun) { return smoothstep(-0.22, 0.2, dot(n, sun)); }`;
+  const VERT = `
+    attribute vec3 col; attribute float ice;
+    varying vec3 vC; varying vec3 vN; varying vec3 vW; varying float vIce;
+    void main() { vC = col; vIce = ice; vN = normal; vW = position; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`;
+  const terrainMat = new THREE.ShaderMaterial({ uniforms: U, vertexShader: VERT, fragmentShader: `
+    precision highp float;
+    uniform vec3 sun; uniform vec3 cam; uniform float atm; uniform float near;
+    varying vec3 vC; varying vec3 vN; varying vec3 vW;
+    ${SKY}
+    void main() {
+      vec3 n = normalize(vN), up = normalize(vW), v = normalize(cam - vW);
+      float d = dot(n, sun), day = dayAmt(up, sun);
+      vec3 warm = mix(vec3(1.0, 0.62, 0.38), vec3(1.0, 0.97, 0.9), smoothstep(0.0, 0.35, dot(up, sun)));
+      vec3 c = vC * (max(d, 0.0) * 1.15 * warm * smoothstep(-0.05, 0.1, dot(up, sun)) + vec3(0.07, 0.09, 0.15) + near * vec3(0.20, 0.22, 0.28) * (0.6 + 0.4 * max(dot(n, up), 0.0)) + 0.10 * day * skyTint(up, sun) * min(atm, 1.2));
+      float rim = pow(1.0 - max(dot(up, v), 0.0), 3.0) * smoothstep(0.05, 0.9, length(cam - vW));
+      c = mix(c, skyTint(up, sun) * day * 0.9, clamp(rim * atm * 0.75, 0.0, 0.8));
+      gl_FragColor = vec4(c, 1.0);
+    }` });
+  const oceanMat = new THREE.ShaderMaterial({ uniforms: U, vertexShader: VERT, transparent: true, fragmentShader: `
+    precision highp float;
+    uniform vec3 sun; uniform vec3 cam; uniform float atm;
+    varying vec3 vW; varying float vIce;
+    ${SKY}
+    void main() {
+      vec3 n = normalize(vW), v = normalize(cam - vW);
+      float d = dot(n, sun), day = dayAmt(n, sun), fres = pow(1.0 - max(dot(n, v), 0.0), 4.0);
+      vec3 base = mix(vec3(0.02, 0.13, 0.30), vec3(0.88, 0.93, 0.98), vIce);
+      float spec = pow(max(dot(n, normalize(sun + v)), 0.0), 140.0) * (1.0 - vIce) * step(0.0, d);
+      vec3 c = base * (max(d, 0.0) * 1.1 + 0.10) + skyTint(n, sun) * day * fres * 0.45 * min(atm + 0.2, 1.2) + vec3(1.0, 0.9, 0.7) * spec * 1.4;
+      float rim = pow(1.0 - max(dot(n, v), 0.0), 3.0);
+      c = mix(c, skyTint(n, sun) * day * 0.9, clamp(rim * atm * 0.75, 0.0, 0.8));
+      gl_FragColor = vec4(c, mix(0.8, 1.0, max(max(fres, vIce), spec)));
+    }` });
+  const cloudMat = new THREE.ShaderMaterial({ uniforms: U, transparent: true, depthWrite: false, side: THREE.DoubleSide,
+    vertexShader: `varying vec3 vW; void main() { vW = position; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+    fragmentShader: `
+    precision highp float;
+    uniform vec3 sun; uniform float atm; uniform float time;
+    varying vec3 vW;
+    float hash(vec3 p) { p = fract(p * 0.3183099 + 0.1); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }
+    float noise(vec3 x) {
+      vec3 i = floor(x), f = fract(x); f = f * f * (3.0 - 2.0 * f);
+      return mix(mix(mix(hash(i), hash(i + vec3(1, 0, 0)), f.x), mix(hash(i + vec3(0, 1, 0)), hash(i + vec3(1, 1, 0)), f.x), f.y),
+                 mix(mix(hash(i + vec3(0, 0, 1)), hash(i + vec3(1, 0, 1)), f.x), mix(hash(i + vec3(0, 1, 1)), hash(i + vec3(1, 1, 1)), f.x), f.y), f.z);
+    }
+    void main() {
+      vec3 n = normalize(vW);
+      float a = time * 0.012, ca = cos(a), sa = sin(a);
+      vec3 p = vec3(n.x * ca - n.z * sa, n.y, n.x * sa + n.z * ca);          // 雲層整體往東飄
+      p += 0.12 * vec3(noise(p * 3.0 + time * 0.02), 0.0, noise(p * 3.0 - time * 0.02));
+      vec3 q = p * vec3(2.6, 5.0, 2.6);
+      float f = 0.5 * noise(q) + 0.25 * noise(q * 2.1 + 3.0) + 0.125 * noise(q * 4.3 + 7.0) + 0.0625 * noise(q * 8.7);
+      float cover = clamp(atm * 0.55, 0.0, 1.0), th = 0.62 - 0.2 * cover;
+      float al = smoothstep(th, th + 0.2, f) * min(1.0, atm * 2.5) * 0.92;
+      float d = dot(n, sun);
+      vec3 c = mix(vec3(1.0, 0.6, 0.4), vec3(1.0), smoothstep(0.0, 0.3, d)) * (smoothstep(-0.12, 0.25, d) * 0.97 + 0.03);
+      gl_FragColor = vec4(c, al);
+    }` });
+  const airMat = new THREE.ShaderMaterial({ uniforms: U, transparent: true, depthWrite: false, side: THREE.BackSide, blending: THREE.AdditiveBlending,
+    vertexShader: `varying vec3 vW; void main() { vW = position; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+    fragmentShader: `
+    precision highp float;
+    uniform vec3 sun; uniform vec3 cam; uniform float atm;
+    varying vec3 vW;
+    ${SKY}
+    void main() {
+      vec3 n = normalize(vW), v = normalize(cam - vW);
+      float g = smoothstep(0.0, 0.6, -dot(n, v));
+      gl_FragColor = vec4(skyTint(n, sun) * dayAmt(n, sun) * g * min(atm, 1.6) * 0.7, 1.0);
+    }` });
+
+  // ───── 星球網格 ─────
+  const DETAIL = narrow ? 30 : 44;
+  const geo = new THREE.IcosahedronGeometry(1, DETAIL);
+  const posA = geo.attributes.position, norA = geo.attributes.normal, NV = posA.count;
+  const dirs = new Float32Array(posA.array), vh = new Float32Array(NV), vcell = new Int32Array(NV), vci = new Int32Array(NV * 4), vcw = new Float32Array(NV * 4), colArr = new Float32Array(NV * 3);
+  for (let i = 0; i < NV; i++) {
+    const l = Math.hypot(dirs[i * 3], dirs[i * 3 + 1], dirs[i * 3 + 2]); dirs[i * 3] /= l; dirs[i * 3 + 1] /= l; dirs[i * 3 + 2] /= l;
+    vcell[i] = sim.fIdx(dirs[i * 3], dirs[i * 3 + 1], dirs[i * 3 + 2]);
+    // 四個相鄰氣候格與權重，上色時做平滑內插
+    const u = (Math.atan2(dirs[i * 3 + 2], dirs[i * 3]) / 6.2831853 + 0.5) * sim.FW - 0.5, v = clamp((0.5 - Math.asin(clamp(dirs[i * 3 + 1], -1, 1)) / Math.PI) * sim.FH - 0.5, 0, sim.FH - 1.001);
+    const i0 = Math.floor(u), j0 = Math.floor(v), fu = u - i0, fv = v - j0, a0 = (i0 + sim.FW) % sim.FW, a1 = (i0 + 1) % sim.FW;
+    vci[i * 4] = j0 * sim.FW + a0; vci[i * 4 + 1] = j0 * sim.FW + a1; vci[i * 4 + 2] = (j0 + 1) * sim.FW + a0; vci[i * 4 + 3] = (j0 + 1) * sim.FW + a1;
+    vcw[i * 4] = (1 - fu) * (1 - fv); vcw[i * 4 + 1] = fu * (1 - fv); vcw[i * 4 + 2] = (1 - fu) * fv; vcw[i * 4 + 3] = fu * fv;
+  }
+  const colA = new THREE.BufferAttribute(colArr, 3);
+  geo.setAttribute('col', colA);
+  geo.setAttribute('ice', new THREE.BufferAttribute(new Float32Array(NV), 1));
+  scene.add(new THREE.Mesh(geo, terrainMat));
+
+  const mix3 = (o, a, b, t) => { o[0] = a[0] + (b[0] - a[0]) * t; o[1] = a[1] + (b[1] - a[1]) * t; o[2] = a[2] + (b[2] - a[2]) * t; };
+  const C = { shallow: [0.50, 0.58, 0.46], deep: [0.03, 0.07, 0.16], snow: [0.93, 0.95, 0.98], tundra: [0.46, 0.43, 0.38], soil: [0.52, 0.43, 0.30],
+    sand: [0.84, 0.72, 0.47], rock: [0.42, 0.40, 0.40], g1: [0.30, 0.52, 0.18], g2: [0.08, 0.30, 0.12] };
+  const tc = [0, 0, 0], tg = [0, 0, 0];
+  function colorVert(i) {
+    const h = vh[i], k = vcell[i];
+    if (h < 0) mix3(tc, C.shallow, C.deep, Math.sqrt(clamp(-h / 0.06, 0, 1)));
+    else {
+      let Ts = 0, hs = 0, veg = 0;
+      for (let q = 0; q < 4; q++) { const kk = vci[i * 4 + q], ww = vcw[i * 4 + q]; Ts += sim.temp[kk] * ww; hs += Math.max(sim.hF[kk], 0) * ww; if (sim.hF[kk] > 0) veg += ww * sim.food[kk] / (sim.cosL[(kk / sim.FW) | 0] * 0.8 + 0.02); else veg += ww * 0.15; }
+      const T = Ts - 350 * (h - hs); veg = clamp(veg, 0, 1);
+      if (T < -6) mix3(tc, C.tundra, C.snow, clamp((-6 - T) / 4, 0, 1));
+      else {
+        mix3(tc, C.soil, C.sand, clamp((T - 30) / 12, 0, 1));
+        if (T < 4) mix3(tc, C.tundra, tc, (T + 6) / 10);
+        if (h > 0.07) mix3(tc, tc, C.rock, clamp((h - 0.07) / 0.03, 0, 1));
+        mix3(tg, C.g1, C.g2, veg); mix3(tc, tc, tg, Math.min(1, veg * 1.3));
+        if (h < 0.004) mix3(tc, C.sand, tc, h / 0.004);
+      }
+    }
+    colArr[i * 3] = tc[0]; colArr[i * 3 + 1] = tc[1]; colArr[i * 3 + 2] = tc[2];
+  }
+  // 更新頂點位置與法線；給了中心點就只更新筆刷附近
+  function updateVerts(cx, cy, cz, cosLim) {
+    const P = posA.array, N = norA.array, e = 0.014;
+    for (let i = 0; i < NV; i++) {
+      const x = dirs[i * 3], y = dirs[i * 3 + 1], z = dirs[i * 3 + 2];
+      if (cosLim !== undefined && x * cx + y * cy + z * cz < cosLim) continue;
+      const h = sim.heightAt(x, y, z), r = 1 + h;
+      vh[i] = h; P[i * 3] = x * r; P[i * 3 + 1] = y * r; P[i * 3 + 2] = z * r;
+      let ax = z, az = -x, al = Math.sqrt(ax * ax + az * az);
+      if (al < 1e-4) { ax = 1; az = 0; al = 1; }
+      ax /= al; az /= al;
+      const bx = y * az, by = z * ax - x * az, bz = -y * ax;      // b = d × a
+      const ga = (sim.heightAt(x + ax * e, y, z + az * e) - h) / e, gb = (sim.heightAt(x + bx * e, y + by * e, z + bz * e) - h) / e;
+      let nx = x - ax * ga - bx * gb, ny = y - by * gb, nz = z - az * ga - bz * gb;
+      const nl = Math.sqrt(nx * nx + ny * ny + nz * nz);
+      N[i * 3] = nx / nl; N[i * 3 + 1] = ny / nl; N[i * 3 + 2] = nz / nl;
+      colorVert(i);
+    }
+    posA.needsUpdate = true; norA.needsUpdate = true; colA.needsUpdate = true;
+  }
+
+  const ogeo = new THREE.IcosahedronGeometry(1, narrow ? 18 : 26);
+  const oN = ogeo.attributes.position.count, oIce = new Float32Array(oN), oCell = new Int32Array(oN);
+  for (let i = 0; i < oN; i++) oCell[i] = sim.fIdx(ogeo.attributes.position.getX(i), ogeo.attributes.position.getY(i), ogeo.attributes.position.getZ(i));
+  const oIceA = new THREE.BufferAttribute(oIce, 1);
+  ogeo.setAttribute('ice', oIceA); ogeo.setAttribute('col', new THREE.BufferAttribute(new Float32Array(oN * 3), 3));
+  const ocean = new THREE.Mesh(ogeo, oceanMat); ocean.renderOrder = 1; scene.add(ocean);
+  function refreshColors() {
+    for (let i = 0; i < NV; i++) colorVert(i);
+    colA.needsUpdate = true;
+    const oy = ogeo.attributes.position.array;   // 海水溫度只跟緯度有關，直接算出平滑的結冰線
+    for (let i = 0; i < oN; i++) { const y = oy[i * 3 + 1]; oIce[i] = clamp((-1 - (sim.climate.mean + sim.climate.grad * 0.8 * (0.3 - y * y))) / 3, 0, 1); }
+    oIceA.needsUpdate = true;
+  }
+
+  const clouds = new THREE.Mesh(new THREE.IcosahedronGeometry(1.085, 16), cloudMat); clouds.renderOrder = 2; scene.add(clouds);
+  const air = new THREE.Mesh(new THREE.IcosahedronGeometry(1.2, 16), airMat); air.renderOrder = 3; scene.add(air);
+
+  // 星空與太陽
+  { const n = 1800, a = new Float32Array(n * 3);
+    for (let i = 0; i < n; i++) { const u = Math.random() * 2 - 1, t = Math.random() * 6.283, s = Math.sqrt(1 - u * u); a[i * 3] = s * Math.cos(t) * 200; a[i * 3 + 1] = u * 200; a[i * 3 + 2] = s * Math.sin(t) * 200; }
+    const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(a, 3));
+    scene.add(new THREE.Points(g, new THREE.PointsMaterial({ color: 0xcfd8ff, size: 1.6, sizeAttenuation: false }))); }
+  const sunSprite = (() => {
+    const c = document.createElement('canvas'); c.width = c.height = 128; const x = c.getContext('2d');
+    const g = x.createRadialGradient(64, 64, 0, 64, 64, 64);
+    g.addColorStop(0, 'rgba(255,255,245,1)'); g.addColorStop(0.12, 'rgba(255,240,200,1)'); g.addColorStop(0.3, 'rgba(255,190,110,0.35)'); g.addColorStop(1, 'rgba(255,160,80,0)');
+    x.fillStyle = g; x.fillRect(0, 0, 128, 128);
+    const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(c), blending: THREE.AdditiveBlending, depthWrite: false }));
+    scene.add(s); return s;
+  })();
+  const sunLight = new THREE.DirectionalLight(0xfff2dd, 0.9); scene.add(sunLight);
+  scene.add(new THREE.AmbientLight(0xaab4cc, 0.8));
+
+  // ───── 生物 ─────
+  const cgeo = new THREE.ConeGeometry(0.5, 1.7, 6); cgeo.rotateX(Math.PI / 2);
+  const cmesh = new THREE.InstancedMesh(cgeo, new THREE.MeshLambertMaterial({ color: 0xffffff }), sim.MAXN + 8);
+  cmesh.instanceColor = new THREE.BufferAttribute(new Float32Array((sim.MAXN + 8) * 3), 3);
+  cmesh.frustumCulled = false; cmesh.count = 0; scene.add(cmesh);
+  const ring = new THREE.Mesh(new THREE.RingGeometry(1.5, 1.85, 28), new THREE.MeshBasicMaterial({ color: 0xffc46b, side: THREE.DoubleSide, transparent: true, opacity: 0.9 }));
+  ring.matrixAutoUpdate = false; ring.visible = false; scene.add(ring);
+  const brushRing = (() => {
+    const pts = []; for (let i = 0; i < 64; i++) { const a = i / 64 * 6.283; pts.push(new THREE.Vector3(Math.cos(a), Math.sin(a), 0)); }
+    const l = new THREE.LineLoop(new THREE.BufferGeometry().setFromPoints(pts), new THREE.LineBasicMaterial({ color: 0xffc46b }));
+    l.matrixAutoUpdate = false; l.visible = false; scene.add(l); return l;
+  })();
+  const m4 = new THREE.Matrix4(), col = new THREE.Color();
+  function surfR(c) { return 1 + Math.max(sim.heightAt(c.x, c.y, c.z), 0); }
+  function basis(mat, c, r, S, flat) {
+    const sx = c.y * c.fz - c.z * c.fy, sy = c.z * c.fx - c.x * c.fz, sz = c.x * c.fy - c.y * c.fx;
+    mat.set(sx * S, c.x * S * flat, c.fx * S, c.x * r,  sy * S, c.y * S * flat, c.fy * S, c.y * r,  sz * S, c.z * S * flat, c.fz * S, c.z * r,  0, 0, 0, 1);
+  }
+  function drawCreatures(viewScale) {
+    const cs = sim.creatures, n = cs.length;
+    for (let i = 0; i < n; i++) {
+      const c = cs[i], S = 0.011 * c.g.size * viewScale, r = surfR(c) + S * 0.35;
+      basis(m4, c, r, S, 0.75); cmesh.setMatrixAt(i, m4);
+      if (c.attacking) col.setRGB(1, 1, 1); else col.setHSL(c.sp.hue, 0.8, 0.45 + 0.2 * (1 - c.g.diet));
+      cmesh.setColorAt(i, col);
+    }
+    cmesh.count = n; cmesh.instanceMatrix.needsUpdate = true; if (cmesh.instanceColor) cmesh.instanceColor.needsUpdate = true;
+    if (sel && !sel.dead) { const S = 0.011 * sel.g.size * viewScale; basis(ring.matrix, { x: sel.x, y: sel.y, z: sel.z, fx: sel.fx, fy: sel.fy, fz: sel.fz }, surfR(sel) + 0.002, S, 1);
+      // 環要平貼地面：把「上」換成法線方向
+      const e = ring.matrix.elements, ux = e[4], uy = e[5], uz = e[6]; e[4] = e[8]; e[5] = e[9]; e[6] = e[10]; e[8] = ux; e[9] = uy; e[10] = uz; ring.visible = true; }
+    else ring.visible = false;
+  }
+
+  // ───── 鏡頭 ─────
+  const orbit = { yaw: 0.6, pitch: 0.35, dist: narrow ? 4.4 : 3.4 };
+  let sel = null, chase = 0.22;
+  const camPos = new THREE.Vector3(), camTarget = new THREE.Vector3(), camUp = new THREE.Vector3(0, 1, 0), fwdS = new THREE.Vector3();
+  const dPos = new THREE.Vector3(), dTar = new THREE.Vector3(), dUp = new THREE.Vector3(), tv = new THREE.Vector3();
+  function orbitDir(o) { return o.set(Math.cos(orbit.pitch) * Math.sin(orbit.yaw), Math.sin(orbit.pitch), Math.cos(orbit.pitch) * Math.cos(orbit.yaw)); }
+  function updateCamera(snap) {
+    if (sel && sel.dead) {
+      const kin = sim.creatures.find((c) => c.sp === sel.sp);
+      if (kin) { sel = kin; toast('牠死了，鏡頭改跟著一隻同類。'); } else { stopFollow(); toast('這個物種滅絕了。'); }
+    }
+    if (sel) {
+      const r = surfR(sel) + 0.006;
+      fwdS.lerp(tv.set(sel.fx, sel.fy, sel.fz), 0.06).normalize();
+      dUp.set(sel.x, sel.y, sel.z);
+      dTar.copy(dUp).multiplyScalar(r).addScaledVector(fwdS, chase * 0.4);
+      dPos.copy(dUp).multiplyScalar(r + chase * 0.75).addScaledVector(fwdS, -chase);
+      const l = dPos.length(); tv.copy(dPos).divideScalar(l);
+      const minR = 1 + Math.max(sim.heightAt(tv.x, tv.y, tv.z), 0) + 0.012;
+      if (l < minR) dPos.copy(tv).multiplyScalar(minR);
+    } else { orbitDir(dPos).multiplyScalar(orbit.dist); dTar.set(0, 0, 0); dUp.set(0, 1, 0); }
+    const k = snap ? 1 : 0.12;
+    camPos.lerp(dPos, k); camTarget.lerp(dTar, k); camUp.lerp(dUp, k).normalize();
+    camera.position.copy(camPos); camera.up.copy(camUp); camera.lookAt(camTarget);
+  }
+  function follow(c) {
+    sel = c; fwdS.set(c.fx, c.fy, c.fz);
+    $('brain').hidden = false; setTool('look'); drawBrain(true);
+  }
+  function stopFollow() {
+    if (!sel) return;
+    sel = null; $('brain').hidden = true;
+    const d = camera.position.clone().normalize();
+    orbit.yaw = Math.atan2(d.x, d.z); orbit.pitch = Math.asin(clamp(d.y, -1, 1));
+  }
+
+  // ───── 指標操作 ─────
+  const ray = new THREE.Raycaster(), ndc = new THREE.Vector2(), hit = new THREE.Vector3();
+  function pickSphere(ev) {
+    const r = canvas.getBoundingClientRect();
+    ndc.set((ev.clientX - r.left) / r.width * 2 - 1, -((ev.clientY - r.top) / r.height * 2 - 1));
+    ray.setFromCamera(ndc, camera);
+    const o = ray.ray.origin, d = ray.ray.direction, b = o.dot(d), cc = o.lengthSq() - 1.03 * 1.03, disc = b * b - cc;
+    if (disc < 0) return null;
+    return hit.copy(o).addScaledVector(d, -b - Math.sqrt(disc)).normalize();
+  }
+  function pickCreature(ev) {
+    const r = canvas.getBoundingClientRect(), px = ev.clientX - r.left, py = ev.clientY - r.top;
+    const cl = camera.position.length(); let best = null, bd = 30 * 30;
+    for (const c of sim.creatures) {
+      if ((c.x * camera.position.x + c.y * camera.position.y + c.z * camera.position.z) / cl < 1 / cl - 0.05) continue;   // 在星球背面
+      tv.set(c.x, c.y, c.z).multiplyScalar(surfR(c)).project(camera);
+      if (tv.z > 1) continue;
+      const dx = (tv.x + 1) / 2 * r.width - px, dy = (1 - tv.y) / 2 * r.height - py, d2 = dx * dx + dy * dy;
+      if (d2 < bd) { bd = d2; best = c; }
+    }
+    return best;
+  }
+  let tool = 'look', brushR = 0.12;
+  const ptrs = new Map(); let sculpting = false, sculptAt = null, downAt = null, pinch = 0, hoverEv = null;
+  function setTool(t) {
+    tool = t;
+    document.querySelectorAll('#tools button').forEach((b) => b.setAttribute('aria-pressed', b.dataset.tool === t));
+    $('toolNote').textContent = t === 'look' ? '拖曳旋轉星球，滾輪或兩指縮放。點一隻生物就能貼近追蹤牠。'
+      : t === 'raise' ? '在星球上按住拖曳，把地面拉高成陸地和山脈。在星球外拖曳或用兩指可以旋轉。'
+      : '在星球上按住拖曳，把地面挖低成海洋。在星球外拖曳或用兩指可以旋轉。';
+    if (t === 'look') brushRing.visible = false;
+  }
+  canvas.addEventListener('pointerdown', (e) => {
+    canvas.setPointerCapture(e.pointerId);
+    ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (ptrs.size === 1) {
+      downAt = { x: e.clientX, y: e.clientY, t: performance.now(), moved: 0 };
+      if (tool !== 'look' && !sel && pickSphere(e)) { sculpting = true; sculptAt = e; }
+    } else { sculpting = false; pinch = 0; downAt = null; }
+  });
+  canvas.addEventListener('pointermove', (e) => {
+    hoverEv = e;
+    const p = ptrs.get(e.pointerId); if (!p) return;
+    const dx = e.clientX - p.x, dy = e.clientY - p.y;
+    p.x = e.clientX; p.y = e.clientY;
+    if (downAt) downAt.moved += Math.abs(dx) + Math.abs(dy);
+    if (ptrs.size === 1) {
+      if (sculpting) sculptAt = e;
+      else if (!sel) { const k = 0.0022 * (orbit.dist - 0.85); orbit.yaw -= dx * k; orbit.pitch = clamp(orbit.pitch + dy * k, -1.45, 1.45); }
+    } else if (ptrs.size === 2) {
+      const [a, b] = [...ptrs.values()], d = Math.hypot(a.x - b.x, a.y - b.y);
+      if (pinch) zoom(pinch / d);
+      pinch = d;
+      if (!sel) { const k = 0.0011 * (orbit.dist - 0.85); orbit.yaw -= dx * k; orbit.pitch = clamp(orbit.pitch + dy * k, -1.45, 1.45); }
+    }
+  });
+  const up = (e) => {
+    ptrs.delete(e.pointerId); pinch = 0; sculpting = false;
+    if (downAt && downAt.moved < 8 && performance.now() - downAt.t < 500 && tool === 'look') {
+      const c = pickCreature(e);
+      if (c) follow(c);
+    }
+    downAt = null;
+  };
+  canvas.addEventListener('pointerup', up); canvas.addEventListener('pointercancel', up);
+  function zoom(f) { if (sel) chase = clamp(chase * f, 0.05, 0.9); else orbit.dist = clamp(orbit.dist * f, 1.35, 7); }
+  canvas.addEventListener('wheel', (e) => { e.preventDefault(); zoom(Math.exp(e.deltaY * 0.0012)); }, { passive: false });
+
+  let lastClimate = 0, dirtyTerrain = false;
+  function doSculpt(dt) {
+    const p = pickSphere(sculptAt); if (!p) return;
+    sim.sculpt(p.x, p.y, p.z, brushR, (tool === 'raise' ? 1 : -1) * 0.11 * dt);
+    updateVerts(p.x, p.y, p.z, Math.cos(brushR + 0.06));
+    dirtyTerrain = true;
+  }
+  function showBrush() {
+    if (tool === 'look' || sel || !hoverEv) { brushRing.visible = false; return; }
+    const p = pickSphere(hoverEv); if (!p) { brushRing.visible = false; return; }
+    const r = 1 + Math.max(sim.heightAt(p.x, p.y, p.z), 0) + 0.012, s = Math.sin(brushR);
+    let ax = p.z, az = -p.x, al = Math.hypot(ax, az) || 1; ax /= al; az /= al;
+    const bx = p.y * az, by = p.z * ax - p.x * az, bz = -p.y * ax;
+    brushRing.matrix.set(ax * s, bx * s, p.x, p.x * r,  0, by * s, p.y, p.y * r,  az * s, bz * s, p.z, p.z * r,  0, 0, 0, 1);
+    brushRing.visible = true;
+  }
+
+  // ───── 介面 ─────
+  let speed = 4, toastT = 0;
+  function toast(t) { const el = $('toast'); el.textContent = t; el.hidden = false; clearTimeout(toastT); toastT = setTimeout(() => { el.hidden = true; }, 3200); }
+  document.querySelectorAll('#speed button').forEach((b) => b.addEventListener('click', () => {
+    speed = +b.dataset.v; document.querySelectorAll('#speed button').forEach((o) => o.setAttribute('aria-pressed', o === b));
+  }));
+  document.querySelectorAll('#tools button').forEach((b) => b.addEventListener('click', () => { if (b.dataset.tool !== 'look') stopFollow(); setTool(b.dataset.tool); }));
+  document.querySelectorAll('#dock .tabs button').forEach((b) => b.addEventListener('click', () => {
+    document.querySelectorAll('#dock .tabs button').forEach((o) => { o.setAttribute('aria-selected', o === b); $(o.dataset.pane).hidden = o !== b; });
+    if (b.id !== 'tab-land') setTool('look');
+    resize();
+  }));
+  $('brush').addEventListener('input', (e) => { brushR = e.target.value / 100; $('brushOut').textContent = brushR < 0.09 ? '小' : brushR < 0.2 ? '中' : '大'; });
+  function envText() {
+    const d = +$('sun').value, a = +$('atm').value, m = sim.climate.mean;
+    $('sunOut').textContent = d.toFixed(2) + ' AU'; $('atmOut').textContent = a.toFixed(2) + ' 倍';
+    $('sTemp').textContent = Math.round(m) + '°C';
+    $('envNote').textContent = '全球均溫約 ' + Math.round(m) + '°C。' + (m < -5 ? '大半個星球結冰，只有赤道附近長得出食物。' : m > 38 ? '赤道熱到寸草不生，生命會往兩極退。' : a < 0.3 ? '大氣稀薄，日夜和緯度溫差都很大，陸地乾燥。' : '溫度適中，陸地和淺海都長得出食物。');
+    U.atm.value = a;
+    sunSprite.scale.setScalar(26 / d);
+  }
+  const onEnv = () => { sim.setClimate(+$('sun').value, +$('atm').value); envText(); refreshColors(); };
+  $('sun').addEventListener('input', onEnv); $('atm').addEventListener('input', onEnv);
+  let armed = 0;
+  $('newPlanet').addEventListener('click', () => {
+    if (performance.now() - armed > 3000) { armed = performance.now(); $('newPlanet').textContent = '再按一次確認（現在的世界會消失）'; setTimeout(() => { $('newPlanet').textContent = '換一顆新星球'; }, 3000); return; }
+    armed = 0; $('newPlanet').textContent = '換一顆新星球';
+    stopFollow(); sim.reset((Math.random() * 2e9) | 1); sim.setClimate(+$('sun').value, +$('atm').value);
+    updateVerts(); refreshColors(); seedLife(); toast('新的星球誕生了。');
+  });
+  $('drop').addEventListener('click', () => {
+    let p;
+    if (sel) p = { x: sel.x, y: sel.y, z: sel.z }; else { const d = orbitDir(tv); p = { x: d.x, y: d.y, z: d.z }; }
+    const n = sim.drop(p.x, p.y, p.z, 40, 0.07);
+    toast(n ? '投放了 ' + n + ' 隻原始生物。' : '星球已經住滿了，等牠們少一點再投放。');
+  });
+  $('bBack').addEventListener('click', stopFollow);
+  $('bNext').addEventListener('click', () => { if (!sel) return; const kin = sim.creatures.filter((c) => c.sp === sel.sp && c !== sel); if (kin.length) follow(kin[(Math.random() * kin.length) | 0]); });
+  $('splist').addEventListener('click', (e) => {
+    const b = e.target.closest('button'); if (!b) return;
+    const kin = sim.creatures.filter((c) => c.sp.id === +b.dataset.id);
+    if (kin.length) follow(kin[(Math.random() * kin.length) | 0]);
+  });
+
+  const tagsOf = (g) => (g.diet < 0.2 ? '草食' : g.diet < 0.45 ? '雜食' : '肉食') + ' · ' + (g.aqua < 0.35 ? '陸棲' : g.aqua < 0.65 ? '兩棲' : '水棲') + ' · 適溫 ' + Math.round(g.tpref) + '°C';
+  function updateStats() {
+    const cs = sim.creatures, alive = sim.species.filter((s) => s.count > 0).sort((a, b) => b.count - a.count);
+    $('sPop').textContent = cs.length; $('sSp').textContent = alive.length; $('sGen').textContent = sim.maxGen; $('sYear').textContent = Math.floor(sim.tick / 200);
+    if (!$('pane-life').hidden) {
+      const box = $('splist');
+      if (!alive.length) { box.innerHTML = '<p class="note">星球上沒有生物了。調整環境後，再投放一批試試。</p>'; return; }
+      box.innerHTML = alive.slice(0, 8).map((s) => '<button type="button" data-id="' + s.id + '"><span class="dot" style="background:hsl(' + Math.round(s.hue * 360) + ',80%,60%)"></span><b>' + s.name + '</b><span class="n">' + s.count + '</span><span class="tags">' + tagsOf(s.ref) + '</span></button>').join('');
+    }
+  }
+
+  // ───── 大腦面板 ─────
+  const IN = ['常數', '能量', '腳下食物', '食物偏左', '前方食物', '前方地形', '體感冷熱', '前方溫差', '鄰居方位', '鄰居距離', '威脅', '同類'], OUT = ['轉向', '前進', '攻擊'];
+  function thought(c) {
+    const a = c.act, NI = sim.NI, NH = sim.NH, turn = a[NI + NH], thrust = (a[NI + NH + 1] + 1) / 2;
+    if (c.attacking) return '鎖定獵物，撲上去！';
+    if (a[10] > 0.35 && a[9] > 0.3) return thrust > 0.5 ? '旁邊有危險的傢伙，快走。' : '旁邊有危險的傢伙，但牠沒在逃。';
+    if (a[6] < -0.5) return c.nb >= 2 ? '好冷，跟同伴擠在一起取暖。' : '好冷，這裡不適合久留。';
+    if (a[6] > 0.5) return '太熱了，很不舒服。';
+    if (a[5] < 0 && thrust > 0.3) return c.g.aqua > 0.5 ? '前面是陸地，' + (Math.abs(turn) > 0.3 ? '轉向。' : '還是硬闖。') : '前面是海，' + (Math.abs(turn) > 0.3 ? '轉向。' : '還是硬闖。');
+    if (a[2] > 0.35 && thrust < 0.35) return '停下來慢慢吃。';
+    if (Math.abs(a[3]) > 0.25 && turn * a[3] > 0.05) return (a[3] > 0 ? '左' : '右') + '前方食物比較多，轉過去。';
+    if (a[1] > 0.95) return '吃飽了，準備繁殖。';
+    if (a[1] < 0.3) return '肚子很餓，到處找吃的。';
+    return thrust > 0.5 ? '邊走邊找食物。' : '在原地打轉。';
+  }
+  const bcv = $('bNet'), bx = bcv.getContext('2d');
+  function drawBrain(full) {
+    const c = sel; if (!c) return;
+    if (full) { $('bName').textContent = c.sp.name; $('bDot').style.background = 'hsl(' + Math.round(c.sp.hue * 360) + ',80%,60%)'; }
+    $('bTags').textContent = tagsOf(c.g) + ' · 體型 ' + c.g.size.toFixed(2);
+    $('bThought').textContent = thought(c);
+    $('bStats').innerHTML = '<b><span>能量</span>' + Math.round(clamp(c.e / (2 * c.g.size), 0, 1) * 100) + '%</b><b><span>第</span>' + c.gen + ' 代</b><b><span>年齡</span>' + Math.floor(c.age / 20) + '</b><b><span>後代</span>' + c.kids + '</b><b><span>體感</span>' + Math.round(c.T) + '°C</b>';
+    const W = bcv.clientWidth, H = bcv.clientHeight, dpr = Math.min(window.devicePixelRatio || 1, 2);
+    if (bcv.width !== Math.round(W * dpr)) { bcv.width = Math.round(W * dpr); bcv.height = Math.round(H * dpr); }
+    bx.setTransform(dpr, 0, 0, dpr, 0, 0); bx.clearRect(0, 0, W, H);
+    const NI = sim.NI, NH = sim.NH, NO = sim.NO, a = c.act, w = c.g.w;
+    const x0 = 70, x1 = W * 0.6, x2 = W - 50, yi = (i) => 9 + i * (H - 18) / (NI - 1), yh = (h) => 16 + h * (H - 32) / (NH - 1), yo = (o) => H / 2 + (o - 1) * 42;
+    bx.lineCap = 'round';
+    for (let h = 0; h < NH; h++) for (let i = 0; i < NI; i++) {
+      const s = a[i] * w[h * NI + i], m = Math.abs(s); if (m < 0.2) continue;
+      bx.strokeStyle = s > 0 ? 'rgba(255,196,107,' + Math.min(0.9, m * 0.45) + ')' : 'rgba(106,169,255,' + Math.min(0.9, m * 0.45) + ')';
+      bx.lineWidth = Math.min(2.5, 0.5 + m); bx.beginPath(); bx.moveTo(x0, yi(i)); bx.lineTo(x1, yh(h)); bx.stroke();
+    }
+    for (let o = 0; o < NO; o++) for (let h = 0; h < NH; h++) {
+      const s = a[NI + h] * w[NI * NH + o * (NH + 1) + 1 + h], m = Math.abs(s); if (m < 0.2) continue;
+      bx.strokeStyle = s > 0 ? 'rgba(255,196,107,' + Math.min(0.9, m * 0.45) + ')' : 'rgba(106,169,255,' + Math.min(0.9, m * 0.45) + ')';
+      bx.lineWidth = Math.min(2.5, 0.5 + m); bx.beginPath(); bx.moveTo(x1, yh(h)); bx.lineTo(x2, yo(o)); bx.stroke();
+    }
+    const node = (x, y, v, r) => {
+      bx.fillStyle = '#0a101c'; bx.beginPath(); bx.arc(x, y, r, 0, 6.283); bx.fill();
+      bx.fillStyle = v > 0 ? 'rgba(255,196,107,' + Math.min(1, Math.abs(v)) + ')' : 'rgba(106,169,255,' + Math.min(1, Math.abs(v)) + ')'; bx.fill();
+      bx.strokeStyle = 'rgba(160,190,230,0.5)'; bx.lineWidth = 1; bx.stroke();
+    };
+    bx.font = (H < 170 ? 10 : 11) + 'px "Noto Sans TC", sans-serif'; bx.textBaseline = 'middle';
+    bx.textAlign = 'right';
+    for (let i = 0; i < NI; i++) { node(x0, yi(i), a[i], 4.5); bx.fillStyle = '#8fa3bd'; bx.fillText(IN[i], x0 - 9, yi(i)); }
+    for (let h = 0; h < NH; h++) node(x1, yh(h), a[NI + h], 5.5);
+    bx.textAlign = 'left';
+    for (let o = 0; o < NO; o++) { node(x2, yo(o), a[NI + NH + o], 7); bx.fillStyle = '#e6eef8'; bx.fillText(OUT[o], x2 + 12, yo(o)); }
+  }
+
+  // ───── 啟動與主迴圈 ─────
+  function seedLife() {
+    // 開場：挑幾個食物豐富的地點各放一小群
+    let spots = 0;
+    for (let tries = 0; tries < 400 && spots < 8; tries++) {
+      const u = Math.random() * 2 - 1, t = Math.random() * 6.283, s = Math.sqrt(1 - u * u), x = s * Math.cos(t), y = u * 0.8, z = s * Math.sin(t), l = Math.hypot(x, y, z);
+      const k = sim.fIdx(x / l, y / l, z / l);
+      if (sim.cap[k] < (spots < 5 ? 0.3 : 0.12) * sim.cosL[(k / sim.FW) | 0]) continue;
+      sim.drop(x / l, y / l, z / l, narrow ? 14 : 20, 0.06); spots++;
+    }
+  }
+  function resize() {
+    const w = canvas.clientWidth, h = canvas.clientHeight;
+    renderer.setSize(w, h, false);
+    camera.aspect = w / h;
+    // 手機上控制台蓋住下半部，把星球往上挪一點
+    if (window.innerWidth < 640) camera.setViewOffset(w, h, 0, $('dock').offsetHeight * 0.42, w, h); else camera.clearViewOffset();
+    camera.updateProjectionMatrix();
+  }
+  window.addEventListener('resize', resize);
+
+  updateVerts(); envText(); refreshColors(); seedLife(); resize(); updateCamera(true);
+  let lastT = performance.now(), dayT = 20, uiT = 0, colT = 0, brainT = 0;
+  function frame(now) {
+    const dt = Math.min((now - lastT) / 1000, 0.05); lastT = now;
+    if (speed > 0) {
+      dayT += dt;
+      const t0 = performance.now();
+      for (let i = 0; i < speed && performance.now() - t0 < 12; i++) sim.step();
+    }
+    if (sculpting && sculptAt) doSculpt(dt);
+    if (dirtyTerrain && now - lastClimate > 220) { sim.refreshClimate(); lastClimate = now; dirtyTerrain = sculpting; refreshColors(); }
+    if (now - colT > 1500) { colT = now; refreshColors(); }
+    const a = dayT * 6.283 / 100;
+    sunDir.set(Math.cos(a), 0.22, Math.sin(a)).normalize();
+    sunSprite.position.copy(sunDir).multiplyScalar(150); sunLight.position.copy(sunDir);
+    U.time.value = dayT; U.near.value += ((sel ? 1 : 0) - U.near.value) * 0.08;
+    updateCamera(false);
+    drawCreatures(clamp((camera.position.length() - 1) * 0.5 + 0.3, 0.45, 1.5));
+    showBrush();
+    if (now - uiT > 400) { uiT = now; updateStats(); }
+    if (sel && now - brainT > 90) { brainT = now; drawBrain(false); }
+    renderer.render(scene, camera);
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+  window.__planet = { sim, follow, stopFollow, orbit, sun: sunDir };
+})();
+</script>
+</body>
+</html>
